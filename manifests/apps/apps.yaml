@@ -1,0 +1,116 @@
+# Edge application (target of the local breakout) and remote application
+# (reference path through the anchor). Both run the same UDP echo server
+# (probe/probe.py), mounted from the ConfigMap in code-configmaps.yaml.
+#
+# Neither Service has a fixed ClusterIP: the Application Function resolves
+# "mec-app" by name and announces the allocated address to the core.
+# See docs/06-traffic-influence.md and docs/09-verification.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mec-app
+  namespace: free5gc
+  labels:
+    app: free5gc-mec-app
+spec:
+  selector:
+    epc-mode: mec-app
+  ports:
+    - name: udp-9000
+      protocol: UDP
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-mec-app
+  namespace: free5gc
+  labels:
+    epc-mode: mec-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      epc-mode: mec-app
+  template:
+    metadata:
+      labels:
+        epc-mode: mec-app
+        app: free5gc-mec-app
+    spec:
+      nodeSelector:
+        # Same node as the I-UPF (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-edge-node
+      volumes:
+        - name: probe
+          configMap:
+            name: lbo-probe
+      containers:
+        - name: probe-server
+          image: python:3.12-slim
+          command: ["python3", "-u", "/opt/probe/probe.py", "server", "--port", "9000"]
+          ports:
+            - name: udp-9000
+              protocol: UDP
+              containerPort: 9000
+          volumeMounts:
+            - name: probe
+              mountPath: /opt/probe
+              readOnly: true
+---
+# Not listed in SERVICES of the Application Function on purpose: traffic to
+# this Service must keep following the default path up to the PSA-UPF.
+apiVersion: v1
+kind: Service
+metadata:
+  name: remote-app
+  namespace: free5gc
+  labels:
+    app: free5gc-remote-app
+spec:
+  selector:
+    epc-mode: remote-app
+  ports:
+    - name: udp-9000
+      protocol: UDP
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-remote-app
+  namespace: free5gc
+  labels:
+    epc-mode: remote-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      epc-mode: remote-app
+  template:
+    metadata:
+      labels:
+        epc-mode: remote-app
+        app: free5gc-remote-app
+    spec:
+      nodeSelector:
+        # Beyond the transport network, and not the core node (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-remote-node
+      volumes:
+        - name: probe
+          configMap:
+            name: lbo-probe
+      containers:
+        - name: probe-server
+          image: python:3.12-slim
+          command: ["python3", "-u", "/opt/probe/probe.py", "server", "--port", "9000"]
+          ports:
+            - name: udp-9000
+              protocol: UDP
+              containerPort: 9000
+          volumeMounts:
+            - name: probe
+              mountPath: /opt/probe
+              readOnly: true

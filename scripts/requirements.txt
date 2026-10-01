@@ -1,0 +1,8 @@
+# The MongoDB image of the manifests (free5gmano/nextepc-mongodb) is mongod
+# 4.0.5, which speaks wire protocol 7. pymongo 4.14 dropped support for
+# MongoDB 4.0 and fails with ConfigurationError before any query.
+pymongo>=4.9,<4.14
+
+# validate.py parses the manifests and the configuration files embedded in
+# the ConfigMaps.
+pyyaml>=6

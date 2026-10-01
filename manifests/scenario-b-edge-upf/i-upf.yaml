@@ -1,0 +1,135 @@
+# Scenario B: I-UPF at the edge node. Branching point (Uplink Classifier) of
+# the session and local anchor of the traffic diverted to the edge service.
+# See docs/04-user-plane.md and docs/05-ulcl-configuration.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i-upf-config
+  namespace: free5gc
+data:
+  upfConfig.yaml: |
+    version: 1.0.3
+    description: I-UPF (edge UPF) - branching point and local breakout
+
+    pfcp:
+      # Must not be 0.0.0.0. Hostname of the pod (spec.hostname below).
+      addr: i-upf-pod
+      # Must match the nodeID declared for this UPF in the SMF configuration.
+      nodeID: i-upf.free5gc.svc.cluster.local
+      retransTimeout: 1s
+      maxRetrans: 3
+
+    gtpu:
+      forwarder: gtp5g
+      # Only the first entry is used by go-upf; 0.0.0.0 covers N3 and N9.
+      ifList:
+        - addr: 0.0.0.0
+          type: N3
+
+    # The branching UPF must list every UE pool that traverses it, although the
+    # addresses are allocated by the PSA-UPF.
+    dnnList:
+      - dnn: internet
+        cidr: 60.60.0.0/16
+
+    logger:
+      enable: true
+      level: info
+      reportCaller: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i-upf-iptables
+  namespace: free5gc
+data:
+  upf-iptables.sh: |
+    #!/bin/bash
+    # Required: decapsulated uplink packets are forwarded, not locally delivered.
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+
+    # NAT is required here too: this UPF is the exit point of the edge traffic.
+    iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+    iptables -I FORWARD 1 -j ACCEPT
+    iptables -A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1400
+
+    ./upf -c /etc/free5gc/upfConfig.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-i-upf
+  namespace: free5gc
+  labels:
+    epc-mode: i-upf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      epc-mode: i-upf
+  template:
+    metadata:
+      labels:
+        epc-mode: i-upf
+        app: free5gc-i-upf
+        version: v4.2.3
+    spec:
+      hostname: i-upf-pod
+      nodeSelector:
+        # Replace with the hostname of the edge node (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-edge-node
+      containers:
+        - name: upf
+          image: free5gc/upf:v4.2.3
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-c", "/free5gc/script/upf-iptables.sh"]
+          ports:
+            - name: udp-2152
+              protocol: UDP
+              containerPort: 2152
+            - name: udp-8805
+              protocol: UDP
+              containerPort: 8805
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN", "SYS_MODULE"]
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/free5gc
+            - name: iptables-script
+              mountPath: /free5gc/script
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+      volumes:
+        - name: config-volume
+          configMap:
+            name: i-upf-config
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+        - name: iptables-script
+          configMap:
+            name: i-upf-iptables
+            defaultMode: 0777
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i-upf
+  namespace: free5gc
+  labels:
+    app: free5gc-i-upf
+spec:
+  selector:
+    epc-mode: i-upf
+    app: free5gc-i-upf
+  ports:
+    - name: udp-2152
+      protocol: UDP
+      port: 2152
+      targetPort: 2152
+    - name: udp-8805
+      protocol: UDP
+      port: 8805
+      targetPort: 8805

@@ -1,0 +1,92 @@
+# NEF: exposure function. Entry point of the Traffic Influence API used by the
+# Application Function in manifests/apps/mec-af.yaml (docs/06-traffic-influence.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nef-config
+  namespace: free5gc
+data:
+  nefConfig.yaml: |
+    info:
+      version: 1.0.1
+      description: NEF initial local configuration
+    configuration:
+      sbi:
+        scheme: http
+        registerIPv4: nef.free5gc.svc.cluster.local
+        bindingIPv4: 0.0.0.0
+        port: 8000
+        tls:
+          pem: cert/nef.pem
+          key: cert/nef.key
+      nrfUri: http://nrf.free5gc.svc.cluster.local:8000
+      serviceList:
+        - serviceName: 3gpp-traffic-influence
+        - serviceName: nnef-oam
+        - serviceName: nnef-callback
+
+    logger:
+      enable: true
+      level: info
+      reportCaller: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-nef
+  namespace: free5gc
+  labels:
+    epc-mode: nef
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      epc-mode: nef
+  template:
+    metadata:
+      labels:
+        epc-mode: nef
+        app: free5gc-nef
+        version: v4.2.3
+    spec:
+      hostname: nef-pod
+      nodeSelector:
+        # Replace with the hostname of the core node (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-core-node
+      containers:
+        - name: nef
+          image: free5gc/nef:v4.2.3
+          imagePullPolicy: IfNotPresent
+          command: ["./nef", "-c", "/etc/free5gc/nefConfig.yaml"]
+          env:
+            - name: GIN_MODE
+              value: release
+          ports:
+            - name: http2-8000
+              protocol: TCP
+              containerPort: 8000
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/free5gc
+      volumes:
+        - name: config-volume
+          configMap:
+            name: nef-config
+            defaultMode: 0777
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nef
+  namespace: free5gc
+  labels:
+    app: free5gc-nef
+spec:
+  selector:
+    epc-mode: nef
+    app: free5gc-nef
+  ports:
+    - name: http2-8000
+      protocol: TCP
+      port: 8000
+      targetPort: 8000

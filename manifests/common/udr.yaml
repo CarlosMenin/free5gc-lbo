@@ -1,0 +1,107 @@
+# UDR: data repository. Also stores the Traffic Influence data written by the
+# NEF (docs/06-traffic-influence.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: udr-config
+  namespace: free5gc
+data:
+  udrConfig.yaml: |
+    info:
+      # v4.2.3 requires version 1.1.0 and the dbConnectorType field below.
+      version: 1.1.0
+      description: UDR initial local configuration
+    configuration:
+      sbi:
+        scheme: http
+        registerIPv4: udr.free5gc.svc.cluster.local
+        bindingIPv4: 0.0.0.0
+        port: 8000
+        tls:
+          pem: cert/udr.pem
+          key: cert/udr.key
+      dbConnectorType: mongodb
+      mongodb:
+        name: free5gc
+        url: mongodb://mongo:27017
+      nrfUri: http://nrf.free5gc.svc.cluster.local:8000
+
+      metrics:
+        enable: true
+        scheme: http
+        bindingIPv4: 0.0.0.0
+        port: 9091
+        namespace: free5gc
+
+    logger:
+      enable: true
+      level: info
+      reportCaller: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-udr
+  namespace: free5gc
+  labels:
+    epc-mode: udr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      epc-mode: udr
+  template:
+    metadata:
+      labels:
+        epc-mode: udr
+        app: free5gc-udr
+        version: v4.2.3
+    spec:
+      hostname: udr-pod
+      nodeSelector:
+        # Replace with the hostname of the core node (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-core-node
+      containers:
+        - name: udr
+          image: free5gc/udr:v4.2.3
+          imagePullPolicy: IfNotPresent
+          command: ["./udr", "-c", "/etc/free5gc/udrConfig.yaml"]
+          env:
+            - name: GIN_MODE
+              value: release
+          ports:
+            - name: http2-8000
+              protocol: TCP
+              containerPort: 8000
+            - name: metrics-9091
+              protocol: TCP
+              containerPort: 9091
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/free5gc
+      volumes:
+        - name: config-volume
+          configMap:
+            name: udr-config
+            defaultMode: 0777
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udr
+  namespace: free5gc
+  labels:
+    app: free5gc-udr
+spec:
+  selector:
+    epc-mode: udr
+    app: free5gc-udr
+  ports:
+    - name: http2-8000
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+    - name: metrics-9091
+      protocol: TCP
+      port: 9091
+      targetPort: 9091

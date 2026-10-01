@@ -1,0 +1,6 @@
+# All resources of the tutorial live in this namespace. The name is also part
+# of every service FQDN in the configuration files (*.free5gc.svc.cluster.local).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: free5gc

@@ -1,0 +1,95 @@
+# mec-af: Application Function that announces the edge services to the NEF
+# through Traffic Influence. The code is af/mec_af.py, mounted from the
+# ConfigMap in code-configmaps.yaml. See docs/06-traffic-influence.md.
+#
+# No ServiceAccount, Role or RoleBinding: the AF does not use the Kubernetes
+# API; service addresses are obtained through DNS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mec-af
+  namespace: free5gc
+  labels:
+    app: mec-af
+spec:
+  replicas: 1
+  # Singleton controller: two instances would compete for the same subscriptions.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mec-af
+  template:
+    metadata:
+      labels:
+        app: mec-af
+    spec:
+      nodeSelector:
+        # The AF belongs to the edge domain (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-edge-node
+      volumes:
+        - name: code
+          configMap:
+            name: mec-af
+      containers:
+        - name: mec-af
+          image: python:3.12-slim
+          command: ["python3", "-u", "/opt/af/mec_af.py"]
+          env:
+            - name: NS
+              value: "free5gc"
+            # Edge services announced to the NEF, comma separated.
+            - name: SERVICES
+              value: "mec-app"
+            - name: NEF_URL
+              value: "http://nef.free5gc.svc.cluster.local:8000"
+            - name: UDR_URL
+              value: "http://udr.free5gc.svc.cluster.local:8000"
+            - name: AF_ID
+              value: "af001"
+            - name: DNN
+              value: "internet"
+            # Every slice listed here needs a UPF with the DNAI below in the
+            # SMF configuration.
+            - name: SNSSAIS
+              value: "1:010203,1:112233"
+            # Union of the UE pools declared for the PSA-UPF.
+            - name: UE_CIDR
+              value: "60.60.0.0/16"
+            # Must match the dnaiList of the I-UPF in the SMF configuration.
+            - name: DNAI
+              value: "mec"
+            - name: NOTIFY_URL
+              value: "http://mec-af.free5gc.svc.cluster.local:8080/notify"
+            - name: POLL_S
+              value: "10"
+          ports:
+            - name: http-8080
+              protocol: TCP
+              containerPort: 8080
+          volumeMounts:
+            - name: code
+              mountPath: /opt/af
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mec-af
+  namespace: free5gc
+  labels:
+    app: mec-af
+spec:
+  selector:
+    app: mec-af
+  ports:
+    - name: http-8080
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

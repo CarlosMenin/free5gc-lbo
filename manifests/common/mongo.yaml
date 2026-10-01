@@ -1,0 +1,61 @@
+# MongoDB: subscriber data and NRF profiles. See docs/03-control-plane.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: free5gc
+spec:
+  ports:
+    - name: mongo-27017
+      protocol: TCP
+      port: 27017
+      targetPort: 27017
+  selector:
+    app: free5gc-mongodb
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: free5gc-mongodb-pv-claim
+  namespace: free5gc
+spec:
+  # Cluster-specific: replace with a storage class available in the cluster.
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free5gc-mongodb
+  namespace: free5gc
+spec:
+  selector:
+    matchLabels:
+      app: free5gc-mongodb
+  template:
+    metadata:
+      labels:
+        app: free5gc-mongodb
+        version: v4.4
+    spec:
+      nodeSelector:
+        # Replace with the hostname of the core node (docs/02, section 2.4).
+        kubernetes.io/hostname: CHANGE-ME-core-node
+      containers:
+      # mongod 4.0.5 (wire protocol 7): requires pymongo < 4.14 on the client side.
+      - image: free5gmano/nextepc-mongodb
+        name: free5gc-mongodb
+        ports:
+        - containerPort: 27017
+          name: mongodb
+        volumeMounts:
+        - name: mongodb-persistent-storage
+          mountPath: /data
+      volumes:
+      - name: mongodb-persistent-storage
+        persistentVolumeClaim:
+          claimName: free5gc-mongodb-pv-claim
